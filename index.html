@@ -113,11 +113,12 @@
       align-items:center;
       justify-content:center;
       padding: 8px 0 4px;
+      min-height: 0;
     }
     .stage{
       position: relative;
       width: var(--wheel-size);
-      height: var(--wheel-size);
+      aspect-ratio: 1;
       margin: 6px auto 10px;
     }
     #wheelCanvas{
@@ -843,11 +844,11 @@
       function resizeCanvasToDisplaySize(){
         const rect = canvas.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
-        const w = Math.max(1, Math.round(rect.width * dpr));
-        const h = Math.max(1, Math.round(rect.height * dpr));
-        if (canvas.width !== w || canvas.height !== h){
-          canvas.width = w;
-          canvas.height = h;
+        const size = Math.min(rect.width, rect.height);
+        const pixelSize = Math.max(1, Math.round(size * dpr));
+        if (canvas.width !== pixelSize || canvas.height !== pixelSize){
+          canvas.width = pixelSize;
+          canvas.height = pixelSize;
         }
       }
 
