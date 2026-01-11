@@ -1,0 +1,194 @@
+<div class="pw">
+  <div class="pw-stage">
+    <canvas id="pwWheel" width="320" height="320"></canvas>
+    <div class="pw-pointer" aria-hidden="true"></div>
+  </div>
+
+  <button class="pw-btn" id="pwSpin">Крутить</button>
+
+  <div class="pw-card" id="pwResult" style="display:none;">
+    <div class="pw-title" id="pwTitle"></div>
+    <div class="pw-timer" id="pwTimer">2:00</div>
+    <button class="pw-btn pw-btn-secondary" id="pwDone">Готово</button>
+  </div>
+
+  <details class="pw-settings">
+    <summary>Настройки: исключить действия</summary>
+    <div id="pwChecks" class="pw-checks"></div>
+  </details>
+</div>
+
+<style>
+  .pw{max-width:360px;margin:0 auto;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:16px}
+  .pw-stage{position:relative;width:320px;height:320px;margin:10px auto 16px}
+  #pwWheel{width:100%;height:100%;display:block;border-radius:50%;box-shadow:0 12px 30px rgba(0,0,0,.12)}
+  .pw-pointer{position:absolute;left:50%;top:-6px;transform:translateX(-50%);
+    width:0;height:0;border-left:14px solid transparent;border-right:14px solid transparent;border-bottom:26px solid #111;}
+  .pw-btn{width:100%;padding:14px 16px;border:0;border-radius:14px;font-weight:700;font-size:16px;cursor:pointer}
+  .pw-btn:disabled{opacity:.6;cursor:not-allowed}
+  .pw-btn{background:#111;color:#fff}
+  .pw-btn-secondary{background:#e9e9e9;color:#111;margin-top:10px}
+  .pw-card{margin-top:14px;padding:14px 14px;border-radius:16px;background:rgba(0,0,0,.04)}
+  .pw-title{font-weight:800;font-size:16px;margin-bottom:6px}
+  .pw-timer{font-variant-numeric:tabular-nums;font-weight:800;font-size:28px}
+  .pw-settings{margin-top:14px}
+  .pw-checks{display:grid;gap:8px;margin-top:10px}
+  .pw-checks label{display:flex;gap:10px;align-items:flex-start;line-height:1.2}
+</style>
+
+<script>
+(() => {
+  // 1) Действия (можешь менять)
+  const ACTIONS = [
+    { id:"water",   label:"Полей 2 минуты", weight:4 },
+    { id:"spray",   label:"Опрыскай 2 минуты", weight:3 },
+    { id:"wipe",    label:"Протри листья 2 минуты", weight:2 },
+    { id:"rotate",  label:"Поверни горшок к свету", weight:2 },
+    { id:"check",   label:"Проверь грунт/влажность", weight:3 },
+    { id:"nothing", label:"Ничего не делай — ты молодец 💚", weight:2 },
+  ];
+
+  // 2) Хранилище исключений
+  const loadExcluded = () => new Set(JSON.parse(localStorage.getItem("pw_excluded") || "[]"));
+  const saveExcluded = (set) => localStorage.setItem("pw_excluded", JSON.stringify([...set]));
+
+  // 3) UI ссылки
+  const canvas = document.getElementById("pwWheel");
+  const ctx = canvas.getContext("2d");
+  const spinBtn = document.getElementById("pwSpin");
+  const doneBtn = document.getElementById("pwDone");
+  const resultBox = document.getElementById("pwResult");
+  const titleEl = document.getElementById("pwTitle");
+  const timerEl = document.getElementById("pwTimer");
+  const checksEl = document.getElementById("pwChecks");
+
+  // 4) Рисуем колесо на canvas
+  const W = canvas.width, H = canvas.height;
+  const cx = W/2, cy = H/2;
+  const r = Math.min(W,H)/2 - 6;
+
+  function drawWheel(items) {
+    ctx.clearRect(0,0,W,H);
+    const n = items.length;
+    const seg = (Math.PI * 2) / n;
+    for (let i=0; i<n; i++) {
+      const start = -Math.PI/2 + i*seg;
+      const end   = start + seg;
+      // чередуем светлые сектора
+      ctx.beginPath();
+      ctx.moveTo(cx,cy);
+      ctx.arc(cx,cy,r,start,end);
+      ctx.closePath();
+      ctx.fillStyle = i%2===0 ? "#f2f2f2" : "#dfeee3";
+      ctx.fill();
+
+      // текст
+      ctx.save();
+      ctx.translate(cx,cy);
+      ctx.rotate(start + seg/2);
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#111";
+      ctx.font = "bold 14px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+      const text = items[i].label.length > 18 ? items[i].label.slice(0,18) + "…" : items[i].label;
+      ctx.fillText(text, r - 14, 6);
+      ctx.restore();
+    }
+
+    // обводка
+    ctx.beginPath();
+    ctx.arc(cx,cy,r,0,Math.PI*2);
+    ctx.strokeStyle = "rgba(0,0,0,.12)";
+    ctx.lineWidth = 6;
+    ctx.stroke();
+  }
+
+  // 5) Взвешенный рандом
+  function pickWeighted(items){
+    const total = items.reduce((s,x)=>s+x.weight,0);
+    let rnd = Math.random()*total;
+    for(const x of items){ rnd -= x.weight; if(rnd<=0) return x; }
+    return items[items.length-1];
+  }
+
+  function getAvailable() {
+    const excluded = loadExcluded();
+    const available = ACTIONS.filter(a => !excluded.has(a.id));
+    return available.length ? available : ACTIONS; // если всё выключили — не ломаемся
+  }
+
+  // 6) Чекбоксы исключений
+  function renderChecks() {
+    const excluded = loadExcluded();
+    checksEl.innerHTML = "";
+    for(const a of ACTIONS){
+      const id = "pw_chk_" + a.id;
+      const row = document.createElement("label");
+      row.innerHTML = `<input type="checkbox" id="${id}"> <span>${a.label}</span>`;
+      const input = row.querySelector("input");
+      input.checked = excluded.has(a.id);
+      input.addEventListener("change", () => {
+        const set = loadExcluded();
+        input.checked ? set.add(a.id) : set.delete(a.id);
+        saveExcluded(set);
+      });
+      checksEl.appendChild(row);
+    }
+  }
+
+  // 7) Анимация вращения (CSS transform на canvas)
+  canvas.style.transition = "transform 3.2s cubic-bezier(.1,.8,.2,1)";
+  let currentRotation = 0;
+  let timerId = null;
+
+  function startTimer(seconds=120){
+    clearInterval(timerId);
+    let left = seconds;
+    const tick = () => {
+      const m = String(Math.floor(left/60));
+      const s = String(left%60).padStart(2,"0");
+      timerEl.textContent = `${m}:${s}`;
+      if(left<=0){ clearInterval(timerId); }
+      left--;
+    };
+    tick();
+    timerId = setInterval(tick, 1000);
+  }
+
+  function spin() {
+    spinBtn.disabled = true;
+
+    const items = getAvailable();
+    drawWheel(items); // перерисуем с учётом исключений
+
+    const picked = pickWeighted(items);
+    const pickedIndex = items.findIndex(x => x.id === picked.id);
+
+    const n = items.length;
+    const segDeg = 360 / n;
+
+    // хотим, чтобы центр выбранного сегмента оказался под стрелкой сверху
+    const spins = 5;
+    const target = (spins * 360) + (360 - (pickedIndex + 0.5) * segDeg);
+
+    currentRotation += target;
+    canvas.style.transform = `rotate(${currentRotation}deg)`;
+
+    setTimeout(() => {
+      titleEl.textContent = "Выпало: " + picked.label;
+      resultBox.style.display = "block";
+      startTimer(120);
+      spinBtn.disabled = false;
+    }, 3300);
+  }
+
+  spinBtn.addEventListener("click", spin);
+  doneBtn.addEventListener("click", () => {
+    resultBox.style.display = "none";
+    clearInterval(timerId);
+  });
+
+  // init
+  renderChecks();
+  drawWheel(getAvailable());
+})();
+</script>
