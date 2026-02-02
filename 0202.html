@@ -460,6 +460,58 @@
       color: var(--text);
     }
     .toggle input{ accent-color: var(--accent); }
+    .feedToggleWithInfo{ position: relative; }
+    .infoIcon{
+      background: transparent;
+      border: none;
+      padding: 0;
+      margin: 0;
+      margin-left: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      opacity: 0.7;
+      transition: opacity 0.2s;
+      user-select: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: rgba(126,226,184,.15);
+    }
+    .infoIcon:hover{ opacity: 1; background: rgba(126,226,184,.25); }
+    .feedInfoBox{
+      margin-top: 10px;
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,.20);
+    }
+    .feedInfoContent{
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+    .feedInfoContent table{
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 12px;
+    }
+    .feedInfoContent table th,
+    .feedInfoContent table td{
+      padding: 6px 8px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    .feedInfoContent table th{
+      font-weight: 900;
+      color: var(--text);
+    }
+    .feedInfoContent table td{
+      color: var(--muted);
+    }
 
     .note{
       margin-top: 10px;
@@ -636,6 +688,10 @@
         <div class="form">
           <input class="input" id="plantName" placeholder="Название (например, Монстера)" maxlength="40" />
           <input class="input" id="plantKind" placeholder="Вид/сорт (необязательно)" maxlength="60" />
+          <label class="toggle" style="margin-top: 4px;">
+            <input type="checkbox" id="plantNotify" />
+            <span>🔔 Уведомлять о поливе</span>
+          </label>
           <button class="btn" id="addPlantBtn">Добавить растение</button>
         </div>
 
@@ -841,7 +897,10 @@
               ...parsed,
               actions: Array.isArray(parsed.actions) && parsed.actions.length ? parsed.actions : state.actions,
               excludedActionIds: Array.isArray(parsed.excludedActionIds) ? parsed.excludedActionIds : [],
-              plants: Array.isArray(parsed.plants) ? parsed.plants : [],
+              plants: Array.isArray(parsed.plants) ? parsed.plants.map(p => ({
+                ...p,
+                notify: p.notify === true || p.notify === false ? p.notify : false
+              })) : [],
               logs: parsed.logs && typeof parsed.logs === "object" ? parsed.logs : {},
               seedling: (() => {
                 const s = parsed.seedling;
@@ -1127,6 +1186,7 @@
       // ===== Plants =====
       const plantName = document.getElementById("plantName");
       const plantKind = document.getElementById("plantKind");
+      const plantNotify = document.getElementById("plantNotify");
       const addPlantBtn = document.getElementById("addPlantBtn");
       const plantsList = document.getElementById("plantsList");
       const plantsCountPill = document.getElementById("plantsCountPill");
@@ -1143,10 +1203,12 @@
           id: uid(),
           name,
           kind,
+          notify: plantNotify?.checked || false,
           createdAt: toISODate(new Date())
         });
         plantName.value = "";
         plantKind.value = "";
+        if (plantNotify) plantNotify.checked = false;
         saveStateDebounced();
         renderPlants();
         try { tg?.HapticFeedback?.notificationOccurred?.("success"); } catch(_) {}
@@ -1170,13 +1232,29 @@
         for (const p of state.plants){
           const el = document.createElement("div");
           el.className = "item";
+          const notifyStatus = p.notify ? "🔔 Уведомления включены" : "🔕 Уведомления выключены";
           el.innerHTML = `
-            <div>
+            <div style="flex: 1;">
               <div class="itemName">${escapeHtml(p.name)}</div>
               <div class="itemMeta">${p.kind ? escapeHtml(p.kind) : "—"} · добавлено ${escapeHtml(p.createdAt || "")}</div>
+              <div class="itemMeta" style="margin-top: 4px; color: ${p.notify ? 'var(--accent)' : 'var(--muted)'};">${notifyStatus}</div>
             </div>
-            <button class="iconBtn danger" title="Удалить">Удалить</button>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <label class="toggle" style="white-space: nowrap; padding: 8px 10px; font-size: 11px;">
+                <input type="checkbox" data-plant-notify-toggle data-plant-id="${escapeHtml(p.id)}" ${p.notify ? 'checked' : ''} />
+                <span>🔔</span>
+              </label>
+              <button class="iconBtn danger" title="Удалить" style="padding: 8px 10px; font-size: 11px;">Удалить</button>
+            </div>
           `;
+          el.querySelector("[data-plant-notify-toggle]")?.addEventListener("change", (e) => {
+            const plant = state.plants.find(x => x.id === p.id);
+            if (plant) {
+              plant.notify = e.target.checked;
+              saveStateDebounced();
+              renderPlants();
+            }
+          });
           el.querySelector("button").addEventListener("click", () => {
             state.plants = state.plants.filter(x => x.id !== p.id);
             for (const dayKey of Object.keys(state.logs || {})){
@@ -1500,8 +1578,16 @@
             <div class="toggles">
               <label class="toggle"><input type="checkbox" class="waterChk"> 💧 Полив</label>
               <label class="toggle"><input type="checkbox" class="treatChk"> 🧴 Обработка</label>
-              <label class="toggle"><input type="checkbox" class="feedChk"> 🌱 Подкормка</label>
+              <div class="toggle feedToggleWithInfo" style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--border); background: rgba(255,255,255,.06); cursor: pointer; user-select: none; font-weight: 850; color: var(--text);">
+                <input type="checkbox" class="feedChk" style="accent-color: var(--accent);"> 
+                <span>🌱 Подкормка</span>
+                <button type="button" class="infoIcon" data-feed-info title="Информация о подкормке">ℹ️</button>
+              </div>
               <label class="toggle"><input type="checkbox" class="pestChk"> 🐛 Вредитель</label>
+            </div>
+            
+            <div class="feedInfoBox" data-feed-info-content style="display:none;">
+              <div class="feedInfoContent" id="feedInfoContent"></div>
             </div>
 
             <textarea class="input note" placeholder="Заметка (необязательно)"></textarea>
@@ -1527,10 +1613,21 @@
           const treatChk = box.querySelector(".treatChk");
           const feedChk = box.querySelector(".feedChk");
           const pestChk = box.querySelector(".pestChk");
+          const feedToggleContainer = box.querySelector(".feedToggleWithInfo");
           waterChk.checked = !!log.water;
           treatChk.checked = !!log.treat;
           feedChk.checked = !!log.feed;
           pestChk.checked = !!log.pest;
+
+          // Обработчик клика на контейнер подкормки (переключает чекбокс)
+          if (feedToggleContainer && feedChk) {
+            feedToggleContainer.addEventListener("click", (e) => {
+              // Если клик был на иконку информации, не переключаем чекбокс
+              if (e.target.closest(".infoIcon")) return;
+              feedChk.checked = !feedChk.checked;
+              feedChk.dispatchEvent(new Event("change"));
+            });
+          }
 
           waterChk.addEventListener("change", () => {
             log.water = waterChk.checked;
@@ -1552,6 +1649,32 @@
             saveStateDebounced();
             renderCalendar();
           });
+
+          // Обработчик для иконки информации о подкормке
+          const feedInfoIcon = box.querySelector("[data-feed-info]");
+          const feedInfoBox = box.querySelector("[data-feed-info-content]");
+          const feedInfoContent = box.querySelector("#feedInfoContent");
+          if (feedInfoIcon && feedInfoBox) {
+            feedInfoIcon.addEventListener("click", (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const isVisible = feedInfoBox.style.display !== "none";
+              feedInfoBox.style.display = isVisible ? "none" : "block";
+              // Здесь будет загружаться информация из таблицы
+              if (!isVisible && feedInfoContent) {
+                // TODO: Интегрировать данные из таблицы подкормки
+                // Контейнер для таблицы: feedInfoContent
+                // Можно использовать feedInfoContent.innerHTML для вставки HTML таблицы
+                // или создать таблицу программно через DOM API
+                feedInfoContent.innerHTML = `
+                  <div style="color: var(--muted); font-size: 12px; margin-bottom: 8px;">
+                    Информация о подкормке будет загружена из таблицы.
+                  </div>
+                  <div id="feedInfoTable"></div>
+                `;
+              }
+            });
+          }
 
           const note = box.querySelector("textarea");
           note.value = log.note || "";
